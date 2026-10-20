@@ -1,0 +1,8 @@
+# The setup image copies the apps from their submodules; a working tree's
+# installs and builds are the host's, and wrong inside Linux.
+**/node_modules
+**/dist
+**/.git
+**/.env
+**/secrets
+go-zenon

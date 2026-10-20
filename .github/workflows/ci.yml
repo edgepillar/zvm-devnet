@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# The whole devnet from a clean checkout, the way a user starts it: setup
+# exits 0 only when every sanity check passed, the last of which is a
+# transaction through the relayer, NoM and derivation, and `docker compose
+# wait` exits with setup's code.
+jobs:
+  devnet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - run: docker compose config -q
+      - run: docker compose build
+      - run: docker compose up -d
+      - name: setup and the sanity check
+        run: |
+          docker compose logs -f --no-log-prefix setup &
+          docker compose wait setup
+      - name: a second up changes nothing and still passes
+        run: |
+          docker compose up -d
+          docker compose wait setup
+      - if: failure()
+        run: docker compose logs --tail 200

@@ -1,0 +1,350 @@
+# A whole ZVM devnet on one machine: its own NoM chain (69, with dynamic
+# plasma, on go-zenon's dev branch), the ZVM on top of it (7340469), every service, every app's contracts and every page, behind
+# one address. `docker compose up -d`; see README.md.
+#
+# Nothing but the gateway is published to the host. Everything a wallet, a
+# page or a script talks to is a path under ZVM_DEVNET_URL, the paths every
+# ZVM page and tool expects of a gateway, so anything pointed at another
+# devnet is pointed here by changing that one base URL.
+
+name: zvm-devnet
+
+x-znnd-health: &znnd-health
+  test:
+    - CMD-SHELL
+    - >-
+      wget -qO- --header='Content-Type: application/json'
+      --post-data='{"jsonrpc":"2.0","id":1,"method":"ledger.getFrontierMomentum","params":[]}'
+      http://127.0.0.1:35997 | grep -qE '"height":([2-9]|[0-9]{2,})'
+  interval: 5s
+  timeout: 5s
+  retries: 60
+  start_period: 10s
+
+# reth has no wget or curl, so its healthcheck is bash's /dev/tcp making a
+# real JSON-RPC call.
+x-reth-health: &reth-health
+  test:
+    - CMD
+    - /bin/bash
+    - -c
+    - >-
+      b='{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}';
+      exec 3<>/dev/tcp/127.0.0.1/8545 &&
+      printf 'POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s' "$${#b}" "$$b" >&3 &&
+      grep -q '"result"' <&3
+  interval: 5s
+  timeout: 5s
+  retries: 60
+  start_period: 10s
+
+x-after-genesis: &after-genesis
+  genesis:
+    condition: service_completed_successfully
+
+services:
+  # --- genesis, once ----------------------------------------------------------
+  genesis:
+    image: zvm-devnet/zvm-core:latest
+    build:
+      context: ./zvm-core
+    entrypoint: ["/bin/sh", "/genesis.sh"]
+    volumes:
+      - ./genesis/genesis.sh:/genesis.sh:ro
+      - ./go-zenon/docker/devnet:/go-zenon-devnet:ro
+      - nom:/nom
+      - l2:/l2
+
+  # --- L1: the devnet's own NoM network ----------------------------------------
+  # One pillar, which must be producing before anyone joins it, and one RPC
+  # node, which is the one everything else reads.
+  l1-pillar:
+    image: zvm-devnet/znnd:latest
+    build:
+      context: ./go-zenon
+    restart: unless-stopped
+    depends_on: *after-genesis
+    environment:
+      ZNND_ROLE: pillar
+    entrypoint: ["/bin/sh", "/l1/entrypoint.sh"]
+    volumes:
+      - ./l1/entrypoint.sh:/l1/entrypoint.sh:ro
+      - nom:/devnet:ro
+      - l1-pillar-data:/root/.znn
+    healthcheck: *znnd-health
+    networks:
+      l1:
+        ipv4_address: 10.70.0.10
+
+  l1-rpc:
+    image: zvm-devnet/znnd:latest
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      l1-pillar:
+        condition: service_healthy
+    environment:
+      ZNND_ROLE: rpc
+    entrypoint: ["/bin/sh", "/l1/entrypoint.sh"]
+    volumes:
+      - ./l1/entrypoint.sh:/l1/entrypoint.sh:ro
+      - nom:/devnet:ro
+      - l1-rpc-data:/root/.znn
+    healthcheck: *znnd-health
+    networks:
+      l1:
+        ipv4_address: 10.70.0.11
+      default: {}
+
+  # --- L2: the execution engine -------------------------------------------------
+  # It never builds a block on its own: the node hands it every one through
+  # the Engine API, derived from NoM.
+  reth:
+    image: ${OP_RETH_IMAGE:-ghcr.io/paradigmxyz/op-reth:v1.10.2}
+    restart: unless-stopped
+    depends_on: *after-genesis
+    entrypoint: ["op-reth"]
+    command:
+      - node
+      - --chain=/config/genesis.json
+      - --datadir=/data
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.jwtsecret=/config/jwt.hex
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.corsdomain=*
+      - --http.api=eth,net,web3,debug,txpool
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.port=8546
+      - --ws.origins=*
+      - --ws.api=eth,net,web3,debug,txpool
+      - --rollup.sequencer=http://relayer:8547
+      - --rollup.disable-tx-pool-gossip
+      - --disable-discovery
+      - --rpc.gascap=300000000
+      - --rpc.txfeecap=0
+    healthcheck: *reth-health
+    volumes:
+      - l2:/config:ro
+      - reth-data:/data
+
+  # --- the ZVM's services -------------------------------------------------------
+  node:
+    image: zvm-devnet/zvm-node:latest
+    build:
+      context: ./zvm-node
+    restart: unless-stopped
+    depends_on:
+      reth:
+        condition: service_healthy
+      l1-rpc:
+        condition: service_healthy
+    command:
+      - node
+      - -config=/config/rollup.json
+      - -jwt=/config/jwt.hex
+      - -l1=http://l1-rpc:35997
+      - -engine=http://reth:8551
+      - -eth=http://reth:8545
+      - -db=/data/zvm.db
+      - -listen=:8080
+      - -faucet=http://faucet:8549
+      - -bridge=http://bridge:8548
+      - -relayer=http://relayer:8547
+      # Written by the setup service; read on every request, so the swap page
+      # and the market appear as soon as they exist.
+      - -dex=/deploy/deployment.json
+      - -apps=/deploy/apps.json
+      # NFT media. No -media-url: that names a CDN hostname that serves media
+      # and nothing else, so the gateway's own would shut its API. Without it,
+      # token URIs are /media/<hash>, which the gateway serves at its root.
+      - -media-dir=/data/media
+      - -volumes=engine=/volumes/engine,nom-l1=/volumes/nom-l1
+      - -mainnet-rpc=off
+      # Contract verification compiles in the fenced-off verifier below, never
+      # in this process, which holds the Engine API secret.
+      - -verifier=http://verifier:8600
+      - -l1-explorer=${L1_EXPLORER_URL:-http://localhost:46000}
+    volumes:
+      - l2:/config:ro
+      - deploy:/deploy:ro
+      - node-data:/data
+      - reth-data:/volumes/engine:ro
+      - l1-rpc-data:/volumes/nom-l1:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz | grep -q '\"ok\":true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # Verification recompiles whatever anyone submits. solc runs here, with no
+  # volume of the node's, a read-only root and no capabilities.
+  verifier:
+    image: zvm-devnet/zvm-node:latest
+    pull_policy: never
+    restart: unless-stopped
+    command: [solcd, -listen=:8600, -solc-dir=/solc]
+    user: "65534:65534"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 2g
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    volumes:
+      - verifier-solc:/solc
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8600/status | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  relayer:
+    image: zvm-devnet/zvm-relayer:latest
+    build:
+      context: ./zvm-relayer
+    restart: unless-stopped
+    depends_on:
+      reth:
+        condition: service_healthy
+      l1-rpc:
+        condition: service_healthy
+    command: [relayer, -config=/config/rollup.json, -l1=http://l1-rpc:35997, -eth=http://reth:8545, -listen=:8547]
+    volumes:
+      - l2:/config:ro
+
+  bridge:
+    image: zvm-devnet/zvm-bridge:latest
+    build:
+      context: ./zvm-bridge
+    restart: unless-stopped
+    depends_on:
+      reth:
+        condition: service_healthy
+      l1-rpc:
+        condition: service_healthy
+    command:
+      - bridge
+      - -config=/config/rollup.json
+      - -l1=http://l1-rpc:35997
+      - -eth=http://reth:8545
+      - -db=/data/bridge.db
+      - -listen=:8548
+      # The withdrawal fee earns QSR; this fuses it to the vault's own plasma.
+      - -fund-plasma
+      - -fund-every=2m
+    volumes:
+      - l2:/config:ro
+      - bridge-data:/data
+
+  faucet:
+    image: zvm-devnet/zvm-core:latest
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      reth:
+        condition: service_healthy
+      l1-rpc:
+        condition: service_healthy
+    entrypoint: ["zvm"]
+    command:
+      - faucet
+      - -config=/config/rollup.json
+      - -l1=http://l1-rpc:35997
+      - -eth=http://reth:8545
+      - -listen=:8549
+      # The gateway is in front, so a visitor is the address it forwards.
+      - -trust-proxies=172.16.0.0/12,10.0.0.0/8,192.168.0.0/16
+    volumes:
+      - l2:/config:ro
+
+  # --- the apps: contracts, then pages ------------------------------------------
+  # Deploys Uniswap V2, the ZNN/QSR pool, the marketplace and farm, Mozaic,
+  # zchan, ZNS and Spark, then builds every page against them and against
+  # ZVM_DEVNET_URL. Each step is skipped when it is already done, so this runs
+  # on every `up` and finishes in seconds after the first. `docker compose
+  # logs -f setup` to watch the first run, which takes about fifteen minutes.
+  setup:
+    image: zvm-devnet/setup:latest
+    build:
+      context: .
+      dockerfile: setup/Dockerfile
+    depends_on:
+      node:
+        condition: service_healthy
+    environment:
+      ZVM_DEVNET_URL: ${ZVM_DEVNET_URL:-http://localhost:47080}
+      DEVNET_ADMIN: ${DEVNET_ADMIN:-}
+    volumes:
+      - l2:/l2:ro
+      - deploy:/deploy
+      - site:/site
+
+  # --- the one published port ---------------------------------------------------
+  gateway:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      - node
+    ports:
+      - "${ZVM_DEVNET_BIND:-127.0.0.1}:${ZVM_DEVNET_PORT:-47080}:80"
+    volumes:
+      - ./gateway/Caddyfile:/etc/caddy/Caddyfile:ro
+      - site:/srv:ro
+
+  # The status page's prober, checking the stack through the gateway the way a
+  # visitor reaches it.
+  status:
+    image: zvm-devnet/zvm-status:latest
+    build:
+      context: ./zvm-status
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    environment:
+      STATUS_ORIGIN: http://gateway
+      STATUS_PUBLIC: ${ZVM_DEVNET_URL:-http://localhost:47080}
+      STATUS_RELAYER: http://relayer:8547
+      STATUS_BRIDGE: http://bridge:8548
+    command: [-db=/data/status.db, -every=1m]
+    volumes:
+      - status-data:/data
+
+  # The stock Zenon explorer, for looking at the L1 itself. Off by default:
+  # `docker compose --profile l1-explorer up -d`, then L1_EXPLORER_URL.
+  l1-explorer:
+    image: zvm-devnet/znnd-explorer:latest
+    build:
+      context: ./go-zenon
+      dockerfile: docker/explorer/Dockerfile
+    profiles: ["l1-explorer"]
+    restart: unless-stopped
+    environment:
+      EXPLORER_DEFAULT_ENDPOINT: ${ZVM_DEVNET_URL:-http://localhost:47080}/zenon
+    ports:
+      - "${ZVM_DEVNET_BIND:-127.0.0.1}:46000:80"
+
+networks:
+  l1:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.70.0.0/24
+
+volumes:
+  nom:
+  l2:
+  deploy:
+  site:
+  l1-pillar-data:
+  l1-rpc-data:
+  reth-data:
+  node-data:
+  bridge-data:
+  verifier-solc:
+  status-data:

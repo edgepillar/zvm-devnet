@@ -1,0 +1,42 @@
+[submodule "zvm-core"]
+	path = zvm-core
+	url = https://github.com/Zenoglyphs-VM/zvm-core.git
+[submodule "zvm-node"]
+	path = zvm-node
+	url = https://github.com/Zenoglyphs-VM/zvm-node.git
+[submodule "zvm-relayer"]
+	path = zvm-relayer
+	url = https://github.com/Zenoglyphs-VM/zvm-relayer.git
+[submodule "zvm-bridge"]
+	path = zvm-bridge
+	url = https://github.com/Zenoglyphs-VM/zvm-bridge.git
+[submodule "zvm-status"]
+	path = zvm-status
+	url = https://github.com/Zenoglyphs-VM/zvm-status.git
+[submodule "zvm-explorer"]
+	path = zvm-explorer
+	url = https://github.com/Zenoglyphs-VM/zvm-explorer.git
+[submodule "zvm-glyphswap"]
+	path = zvm-glyphswap
+	url = https://github.com/Zenoglyphs-VM/zvm-glyphswap.git
+[submodule "zvm-karum"]
+	path = zvm-karum
+	url = https://github.com/Zenoglyphs-VM/zvm-karum.git
+[submodule "zvm-nft"]
+	path = zvm-nft
+	url = https://github.com/Zenoglyphs-VM/zvm-nft.git
+[submodule "zvm-mozaic"]
+	path = zvm-mozaic
+	url = https://github.com/Zenoglyphs-VM/zvm-mozaic.git
+[submodule "zvm-zns"]
+	path = zvm-zns
+	url = https://github.com/Zenoglyphs-VM/zvm-zns.git
+[submodule "zvm-spark"]
+	path = zvm-spark
+	url = https://github.com/Zenoglyphs-VM/zvm-spark.git
+[submodule "zvm-zchan"]
+	path = zvm-zchan
+	url = https://github.com/Zenoglyphs-VM/zvm-zchan.git
+[submodule "go-zenon"]
+	path = go-zenon
+	url = https://github.com/zenon-network/go-zenon.git

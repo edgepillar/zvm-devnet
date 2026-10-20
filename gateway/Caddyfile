@@ -1,0 +1,92 @@
+# Every path of the devnet, behind one port. The paths every
+# ZVM page and tool expects of a gateway, so one built for another devnet
+# works here with only its base URL changed.
+#
+#   /zvm/        the ZVM node: /rpc, /l1rpc, /api/*, /healthz, /media/*
+#   /zenon       the NoM node: HTTP JSON-RPC, and WebSocket on the same path
+#   /media/*     NFT media, which token URIs name at the origin's root
+#   /status/     the status page, and /status/api/* its prober
+#   /explorer/ /glyphswap/ /karum/ /nft/ /mozaic/ /zchan/ /zns/ /spark/
+#                the pages, built by the setup service into the site volume
+{
+	auto_https off
+	admin off
+	servers {
+		# The faucet's cooldown keys on the visitor in X-Forwarded-For. From an
+		# untrusted peer Caddy replaces that header with the peer, which would
+		# make every visitor one.
+		trusted_proxies static private_ranges
+	}
+}
+
+# A page: built with its prefix as Vite's base, or with relative assets and
+# hash routes. A path that is not a file is a route in the page.
+(page) {
+	redir /{args[0]} /{args[0]}/ 308
+	handle /{args[0]}/* {
+		root * /srv
+		try_files {path} /{args[0]}/index.html
+		file_server
+	}
+	@{args[0]}-shell path /{args[0]}/ /{args[0]}/index.html
+	header @{args[0]}-shell Cache-Control "no-cache"
+	@{args[0]}-assets path /{args[0]}/assets/*
+	header @{args[0]}-assets Cache-Control "public, max-age=31536000, immutable"
+}
+
+:80 {
+	encode zstd gzip
+
+	redir / /explorer/ 302
+	redir /zvm /zvm/ 308
+
+	# The node, by an allow-list of what it serves to a stranger. Anything else
+	# under /zvm/ is a page of the node's own explorer, which assumes it owns
+	# the origin's root, so it goes to the standalone explorer at the same path.
+	handle /zvm/* {
+		uri strip_prefix /zvm
+		@node path /rpc /l1rpc /api /api/* /healthz /media/*
+		handle @node {
+			reverse_proxy node:8080
+		}
+		handle {
+			redir * /explorer{uri} 302
+		}
+	}
+
+	handle /media/* {
+		reverse_proxy node:8080
+	}
+
+	# One path for both of znnd's transports, because that is what a wallet
+	# expects to paste. Upgrade is matched case-insensitively: Node and Go
+	# clients send it in lower case.
+	@zenon path /zenon /zenon/*
+	handle @zenon {
+		uri strip_prefix /zenon
+		@ws header_regexp Upgrade (?i)^websocket$
+		reverse_proxy @ws l1-rpc:35998
+		reverse_proxy l1-rpc:35997
+	}
+
+	# The status page and its API, same-origin.
+	redir /status /status/ 308
+	handle /status/api/* {
+		uri strip_prefix /status
+		reverse_proxy status:8090
+	}
+
+	import page status
+	import page explorer
+	import page glyphswap
+	import page karum
+	import page nft
+	import page mozaic
+	import page zchan
+	import page zns
+	import page spark
+
+	handle {
+		respond "Not found" 404
+	}
+}

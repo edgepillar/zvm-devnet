@@ -1,0 +1,3 @@
+# The scripts and the Caddyfile run inside Linux containers, mounted or copied
+# from the checkout, so a Windows checkout must not give them CRLF endings.
+* text=auto eol=lf

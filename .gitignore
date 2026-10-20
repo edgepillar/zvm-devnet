@@ -1,0 +1,35 @@
+# Working notes, handoffs and logs: the state of a session, not of the code.
+HANDOFF*.md
+handoff*.md
+NOTES*.md
+notes/
+TODO.md
+scratch/
+*.log
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+
+# Secrets and local settings. .env.example is the template that is shared.
+.env
+*.env
+.env.*
+!.env.example
+secrets/
+keys/
+*.key
+*.pem
+jwt.hex
+
+# What `docker compose cp` brings out of the volumes.
+deploy/
+site/
+
+# Editors and operating systems.
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.vscode/
+.idea/

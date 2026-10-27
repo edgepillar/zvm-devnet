@@ -24,10 +24,15 @@ COPY zvm-core/ ./
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/zvm ./cmd/zvm
 
+COPY setup/receive.go /qualification/receive.go
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/zvm-devnet-receive /qualification/receive.go
+
 FROM node:22-alpine
 RUN apk add --no-cache wget
 COPY --from=cli /out/zvm-node /usr/local/bin/zvm-node
 COPY --from=zvm /out/zvm /usr/local/bin/zvm
+COPY --from=zvm /out/zvm-devnet-receive /usr/local/bin/zvm-devnet-receive
 
 WORKDIR /apps
 # verify-tokens submits WZNN's and WQSR's sources from a zvm-node checkout.
@@ -55,7 +60,7 @@ RUN date -u +%s >/apps/.built-from
 
 # accounts.mjs resolves viem from Mozaic's install, the nearest node_modules above it.
 RUN ln -s zvm-mozaic/node_modules /apps/node_modules
-COPY setup/accounts.mjs setup/admin.mjs setup/check.mjs setup/seed.mjs /apps/
+COPY setup/accounts.mjs setup/admin.mjs setup/check.mjs setup/seed.mjs setup/peg.mjs setup/settlement.mjs setup/seed-state.mjs /apps/
 COPY setup/setup.sh /usr/local/bin/setup
 RUN chmod +x /usr/local/bin/setup
 ENTRYPOINT ["setup"]

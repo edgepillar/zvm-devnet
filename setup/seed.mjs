@@ -25,6 +25,7 @@ import {
   zeroHash,
 } from 'viem'
 import {privateKeyToAccount} from 'viem/accounts'
+import {runBridgeQualification} from './peg.mjs'
 
 const NODE = 'http://node:8080'
 const RPC = `${NODE}/rpc`
@@ -60,21 +61,6 @@ async function send(i, tx) {
 const call = (i, address, abi, functionName, args, value) =>
   send(i, {to: address, data: encodeFunctionData({abi, functionName, args}), value})
 const deadline = () => BigInt(Math.floor(Date.now() / 1000) + 600)
-
-// A z1 address's 20 bytes, which are also its 0x spelling on the ZVM: bech32,
-// human-readable part "z".
-function nomBytes(z1) {
-  const C = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
-  const data = [...z1.slice(z1.lastIndexOf('1') + 1)].map((c) => C.indexOf(c)).slice(0, -6)
-  let acc = 0, bits = 0
-  const out = []
-  for (const v of data) {
-    acc = (acc << 5) | v
-    bits += 5
-    while (bits >= 8) out.push((acc >> (bits -= 8)) & 0xff)
-  }
-  return toHex(Uint8Array.from(out.slice(0, 20)))
-}
 
 // --- names ------------------------------------------------------------------------
 // Three .znn names, each its owner's primary name, so pages show names. Seven
@@ -201,17 +187,7 @@ await step('Spark coin launched by account 7, bought by account 8', async () => 
   return `${token}`
 })
 
-// --- the bridge ---------------------------------------------------------------------------
-// A withdrawal from the ZVM to NoM (dev index 9, z1qqcam4…), which the bridge
-// pays out on NoM a few momentums later, and a QSR deposit the other way.
-const bridge = parseAbi(['function withdrawZNN(address nomRecipient) payable'])
-const BRIDGE = '0x4200000000000000000000000000000000000100' // the bridge predeploy, zvm-core rollup.BridgeAddr
-await step('bridge withdrawal, account 9 to NoM index 9', async () => {
-  await call(9, BRIDGE, bridge, 'withdrawZNN', [nomBytes('z1qqcam4ycu0ta8333hx38r5j2z3ry9jjfxkc7t5')], parseEther('25'))
-})
-await step('bridge deposit, 1,000 QSR from NoM index 8 to account 8', async () => {
-  execFileSync('zvm', ['deposit', '-config', '/l2/rollup.json', '-l1', 'http://l1-rpc:35997', '-eth', 'http://reth:8545',
-    '-index', '8', '-token', 'QSR', '-amount', '1000', '-to', who(8)], {stdio: 'inherit'})
-})
+// --- completed bridge settlement and both call lanes --------------------------
+await runBridgeQualification()
 
 console.log('\nseeded: names, swaps, a pool position, NFT listings, Mozaic, zchan, Spark, the bridge both ways')

@@ -27,7 +27,8 @@ CLI="-config /l2/rollup.json -l1 http://l1-rpc:35997 -eth http://reth:8545 -subm
 mkdir -p /deploy/keys
 
 case "${1:-}" in
-check) exec node /apps/check.mjs ;;
+check) shift; exec node /apps/check.mjs "$@" ;;
+seed-state) exec node /apps/seed-state.mjs ;;
 seed)
 	[ -f /site/.stamp ] || { echo "setup has not finished: docker compose logs setup" >&2; exit 1; }
 	exec node /apps/seed.mjs

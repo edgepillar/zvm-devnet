@@ -178,3 +178,10 @@ their own repositories against this devnet's `ZVM_RPC`.
 ## Licence
 
 MIT. The submodules carry their own.
+
+## Completed seed settlement qualification
+
+The seed qualifies ZNN/QSR deposits and completed withdrawals with exact
+recipient accounting, plus native and relayed calls. CI runs the seed and
+`setup check --require-seed` after lightweight controls and the real stack build.
+See [the qualification scope and recovery limits](docs/SEED_QUALIFICATION.md).

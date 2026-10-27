@@ -7,29 +7,57 @@ on:
 permissions:
   contents: read
 
-# The whole devnet from a clean checkout, the way a user starts it: setup
-# exits 0 only when every sanity check passed, the last of which is a
-# transaction through the relayer, NoM and derivation, and `docker compose
-# wait` exits with setup's code.
 jobs:
+  seed-controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Check seed accounting and actual checker regressions without a stack
+        run: node --experimental-vm-modules --test --test-reporter=tap setup/*.test.mjs
+
+  # Keep the real clean-checkout stack. The lightweight controls prevent a
+  # known-invalid candidate from paying for a full multi-service build.
   devnet:
+    needs: seed-controls
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
-
+          persist-credentials: false
       - run: docker compose config -q
       - run: docker compose build
       - run: docker compose up -d
-      - name: setup and the sanity check
+      - name: Setup and the sanity check
         run: |
           docker compose logs -f --no-log-prefix setup &
           docker compose wait setup
-      - name: a second up changes nothing and still passes
+          setup_id="$(docker compose ps --all --quiet setup)"
+          test -n "$setup_id"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$setup_id")" = 0
+      - name: A second up changes nothing and still passes
         run: |
           docker compose up -d
           docker compose wait setup
+          setup_id="$(docker compose ps --all --quiet setup)"
+          test -n "$setup_id"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$setup_id")" = 0
+      - name: Seed the actual applications and complete both peg directions
+        run: docker compose run --rm setup seed
+      - name: Require exact completed seeded settlement
+        run: docker compose run --rm setup check --require-seed
+      - name: A second seed preserves the selected account and evidence state
+        run: |
+          docker compose run --rm setup seed-state >seed-before.json
+          docker compose run --rm setup seed
+          docker compose run --rm setup seed-state >seed-after.json
+          cmp seed-before.json seed-after.json
       - if: failure()
         run: docker compose logs --tail 200

@@ -9,6 +9,7 @@
 import {existsSync, readFileSync} from 'node:fs'
 import {createPublicClient, createWalletClient, defineChain, getAddress, http, namehash, parseAbi, parseEther} from 'viem'
 import {privateKeyToAccount} from 'viem/accounts'
+import {verifyBridgeQualification} from './peg.mjs'
 
 const GW = 'http://gateway'
 const read = (f) => JSON.parse(readFileSync(`/deploy/${f}`, 'utf8'))
@@ -161,6 +162,9 @@ await check('a transaction lands (relayer → NoM → derivation)', async () => 
 // --- the test data -----------------------------------------------------------------
 // Only after `setup seed`: each thing it made, read back from the chain rather
 // than taken from its own record.
+if (process.argv.includes('--require-seed') && !existsSync('/deploy/seed.json')) {
+  await check('seed: required record', async () => { throw new Error('the required seed record is unavailable') })
+}
 if (existsSync('/deploy/seed.json')) {
   const seed = read('seed.json')
   const zns = read('zns.json').contracts
@@ -188,10 +192,9 @@ if (existsSync('/deploy/seed.json')) {
     const b = await client.readContract({address: token, abi: balance, functionName: 'balanceOf', args: [accounts[8].address]})
     assert(b > 0n, 'account 8 holds none of the coin')
   })
-  await check('seed: bridge withdrawal', async () => {
-    const s = await (await get('http://bridge:8548/status')).json()
-    assert(BigInt(s.paidZNN) + BigInt(s.pendingZNN) > 0n, 'the bridge has no ZNN withdrawal')
-    return BigInt(s.paidZNN) > 0n ? 'paid' : 'pending'
+  await check('seed: completed bridge settlement', async () => {
+    await verifyBridgeQualification()
+    return 'four peg legs and native/relayed call lanes'
   })
 }
 

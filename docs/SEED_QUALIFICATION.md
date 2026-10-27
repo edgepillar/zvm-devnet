@@ -15,8 +15,11 @@ exact net amount. The checker binds each withdrawal event and record to the
 confirmed exact NoM vault payout, its withdrawal-ID payload, the recipient's
 receive block and the recipient balance delta. EVM recipient observations are
 read at retained canonical block hashes; source debits include observed gas
-and any reported L1 fee. Zero-value native calls and the nonzero relayed
-transfer are checked against their actual receipts and recipients.
+and any reported L1 fee. The zero-value native EOA call declares 21,000 gas
+and pays the CLI's ZNN fee quote for the selected chain. Its receipt and
+recipient are checked; contract creation, calldata execution and other gas
+limits remain outside this selected call. The nonzero relayed transfer is
+checked against its actual receipt and recipient.
 
 Intent is retained before each possible submission. An incomplete or ambiguous
 attempt is preserved and refused on later runs. The controller does not re-sign,
@@ -44,3 +47,8 @@ not independent NoM value proofs, authenticated production release/context
 acceptance, supported-browser qualification, adversarial endpoint assurance,
 cross-file snapshots, general wallet recovery or hardware power-loss proof.
 No public-chain, real-fund, release or deployment operation is required.
+
+A separate submission fixture executes the real peg entry point and adapter
+with synthetic CLI transport. It checks the native gas and fee-token
+arguments and both unchanged deposit token/amount paths. It does not run
+the Go CLI, buy real gas or qualify a completed native transaction.

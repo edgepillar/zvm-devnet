@@ -167,7 +167,7 @@ function adapter() {
       const args = [leg.kind === 'deposit' ? 'deposit' : 'call', '-config', '/l2/rollup.json', '-l1', NOM,
         '-eth', 'http://reth:8545', '-index', '8', '-wait', '0', '-to', initial.recipient]
       if (leg.kind === 'deposit') args.push('-token', leg.token, '-amount', (BigInt(leg.gross) / 100_000_000n).toString())
-      else args.push('-value', '0', '-data', '0x')
+      else args.push('-value', '0', '-data', '0x', '-gas', '21000', '-fee-token', 'ZNN')
       const result = command('zvm', args)
       const match = result.text.match(/^NoM block\s+([0-9a-f]{64})\b/m)
       insist(match, 'CLI source publication identity is unknown')
